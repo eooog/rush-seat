@@ -41,12 +41,14 @@
 | Metric | Target |
 |---|---:|
 | Total seats | 100,000 |
+| Queue enter attempts | 100,000 ~ 1,000,000 |
 | Subscription tile size | 300 ~ 700 seats |
 | Default tile size | 500 seats |
 | Display sectors | 20 ~ 50 |
 | Subscription tiles | 약 200 |
 | Concurrent WebSocket clients | 1,000 ~ 5,000 |
 | Client subscribed tiles | 1 ~ 3 |
+| Hold request rate | 300 ~ 500 rps |
 | Hold API p95 | < 500ms |
 | Hold API p99 | < 1s |
 | WebSocket propagation p95 | < 300ms |
@@ -472,7 +474,44 @@ ON reservation(event_id, user_id, idempotency_key);
 
 ---
 
-## 10. WebSocket Event Batching
+## 10. Frontend Design
+
+프론트엔드는 `Vite + Vanilla TypeScript`로 구현한다.
+
+프론트엔드의 목표는 화면을 화려하게 만드는 것이 아니라, 다음 동작을 검증하는 것이다.
+
+- 대기열 진입 및 순번 조회
+- admission token 획득 후 좌석 선택 화면 진입
+- sector / tile snapshot 조회
+- WebSocket tile subscription
+- tile delta event 적용
+- 좌석 클릭 시 즉시 hold 요청
+- stale snapshot / version gap 발생 시 resync
+- p50 / p95 / p99 측정용 client-side timestamp 기록
+
+좌석 렌더링은 DOM element 10만 개를 만들지 않고 Canvas 기반으로 처리한다.
+
+```text
+frontend/
+  index.html
+  src/
+    main.ts
+    api/
+      queueApi.ts
+      seatApi.ts
+    ws/
+      seatSocket.ts
+    seatmap/
+      seatStore.ts
+      seatRenderer.ts
+      tileSubscription.ts
+    metrics/
+      latencyRecorder.ts
+```
+
+---
+
+## 11. WebSocket Event Batching
 
 좌석 변경 이벤트는 1건마다 보내지 않고 tile 단위로 batch 처리한다.
 
@@ -508,7 +547,7 @@ batch max payload: 32~64KB
 
 ---
 
-## 11. Consistency Rules
+## 12. Consistency Rules
 
 - `RESERVED` asset은 다시 hold될 수 없다.
 - 만료되지 않은 `HELD` asset은 다른 사용자가 hold할 수 없다.
@@ -522,9 +561,43 @@ batch max payload: 32~64KB
 
 ---
 
-## 12. Load Test Plan
+## 13. Load Test Plan
 
-### 12.1 Tile Size Test
+### 13.1 Load Scale
+
+100만 요청은 단일 endpoint에 무작정 때리는 목표가 아니라, 예매 오픈 시나리오 전체의 총량으로 해석한다.
+
+| Tier | Purpose | Target |
+|---|---|---:|
+| Smoke | 기능 검증 | 10,000 queue enter attempts |
+| MVP | 로컬 성능 기준 | 100,000 queue enter attempts |
+| Target | 포트폴리오 기준 | 1,000,000 queue enter attempts |
+| Stretch | 분산 부하 테스트 | 2,000,000+ queue enter attempts |
+
+Target 시나리오의 기준값:
+
+```text
+total seats: 100,000
+queue enter attempts: 1,000,000
+admitted users: 5,000 ~ 20,000
+WebSocket clients: 1,000 ~ 5,000
+subscribed tiles per client: 1 ~ 3
+hold attempts: 50,000 ~ 200,000
+hold request rate: 300 ~ 500 rps
+confirm attempts: 1,000 ~ 10,000
+```
+
+핵심은 전체 요청 수보다 다음이 더 중요하다.
+
+```text
+- 대기열이 예약 API 유입량을 제한하는가
+- hot tile에서 WebSocket event propagation이 밀리지 않는가
+- hold API p95 / p99가 유지되는가
+- false-positive click failure rate가 낮게 유지되는가
+- oversell / duplicate hold가 0인가
+```
+
+### 13.2 Tile Size Test
 
 총 좌석 수는 100,000개로 고정하고 tile 크기를 비교한다.
 
@@ -546,9 +619,7 @@ batch max payload: 32~64KB
 - false-positive click failure rate
 - resync required count
 
----
-
-### 12.2 Uniform Load
+### 13.3 Uniform Load
 
 사용자가 여러 tile에 고르게 분산된 상황.
 
@@ -560,9 +631,7 @@ subscribed tiles per client: 1 ~ 3
 hold request rate: 300 ~ 500 rps
 ```
 
----
-
-### 12.3 Hotspot Load
+### 13.4 Hotspot Load
 
 실제 예매에 가까운 상황.
 
@@ -574,9 +643,7 @@ hold requests are concentrated on hot tiles
 
 이 테스트를 통해 hot tile에서 WebSocket event propagation이 밀리는지 확인한다.
 
----
-
-### 12.4 Spike Load
+### 13.5 Spike Load
 
 예매 오픈 순간을 재현한다.
 
@@ -587,9 +654,20 @@ hold requests are concentrated on hot tiles
 2m  -> sustain
 ```
 
+### 13.6 Soak Load
+
+낮은 부하를 오래 유지해서 누수와 적체를 확인한다.
+
+```text
+duration: 30m ~ 1h
+queue rank polling: steady
+WebSocket clients: 1,000+
+hold request rate: 50 ~ 100 rps
+```
+
 ---
 
-## 13. Metrics
+## 14. Metrics
 
 ### HTTP Metrics
 
@@ -637,7 +715,7 @@ hold requests are concentrated on hot tiles
 
 ---
 
-## 14. Success Criteria
+## 15. Success Criteria
 
 MVP 성공 기준:
 
@@ -654,9 +732,20 @@ MVP 성공 기준:
 10. tile size별 p50 / p95 / p99 비교 리포트 작성
 ```
 
+Target 성공 기준:
+
+```text
+1. 1,000,000 queue enter attempts 처리
+2. 1,000 ~ 5,000 WebSocket clients 유지
+3. hot tile load에서도 WebSocket propagation p99 < 1s
+4. hold request 300 ~ 500 rps에서 hold API p99 < 1s
+5. oversell count = 0
+6. duplicate hold count = 0
+```
+
 ---
 
-## 15. 6-Week Plan
+## 16. 6-Week Plan
 
 | Week | Goal |
 |---:|---|
@@ -669,7 +758,7 @@ MVP 성공 기준:
 
 ---
 
-## 16. Non-Goals
+## 17. Non-Goals
 
 6주 MVP에서는 다음을 제외한다.
 
@@ -685,24 +774,36 @@ MVP 성공 기준:
 
 ---
 
-## 17. Tech Stack
+## 18. Tech Stack
 
 | Area | Stack |
 |---|---|
-| Backend | Kotlin, Spring Boot |
+| Language | Kotlin |
+| Runtime | Java 21 |
+| Backend Framework | Spring Boot 3.5.16 |
+| Build | Gradle |
+| HTTP API | Spring MVC |
+| Realtime | Spring WebSocket |
 | Database | PostgreSQL |
+| DB Access | JPA, JdbcClient/JdbcTemplate for hot path SQL |
+| Migration | Flyway |
 | Cache / Queue / Claim Gate | Redis |
-| Realtime | WebSocket |
+| Frontend | Vite, Vanilla TypeScript, HTML, CSS |
+| Seatmap Rendering | Canvas |
 | Load Test | k6 |
-| Observability | Micrometer, Prometheus, Grafana |
+| Metrics | Spring Boot Actuator, Micrometer, Prometheus |
+| Dashboard | Grafana |
+| Test | JUnit5, Testcontainers |
 | Runtime | Docker Compose |
 
 ---
 
-## 18. Project Summary
+## 19. Project Summary
 
 이 프로젝트는 10만 좌석 규모의 대규모 예매 상황에서 Redis 대기열로 선택 화면 진입을 제어하고, WebSocket을 통해 사용자가 보고 있는 sector-tile의 좌석 상태만 실시간 동기화한다.
 
 좌석 클릭 시 Redis claim gate로 동시 클릭 UX를 완화하고, PostgreSQL 조건부 update로 `AVAILABLE -> HELD` 전이를 성공시킨 경우에만 좌석 선점을 인정한다.
+
+프론트엔드는 `Vite + Vanilla TypeScript + Canvas`로 구현하여 대량 좌석 상태 변경을 가볍게 렌더링한다.
 
 성능은 단순 TPS가 아니라 hold API latency, WebSocket propagation latency, false-positive click failure rate, oversell count, duplicate hold count, p50/p95/p99 기준으로 검증한다.
