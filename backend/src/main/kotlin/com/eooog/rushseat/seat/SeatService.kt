@@ -98,10 +98,20 @@ class SeatService(
     fun findAssetState(eventId: Long, assetId: Long): AssetState? {
         return jdbc.sql(
             """
-            SELECT id, event_id, tile_id, status, version, hold_expires_at
-            FROM asset
-            WHERE event_id = :eventId
-              AND id = :assetId
+            SELECT
+                a.id,
+                a.event_id,
+                a.tile_id,
+                st.version AS tile_version,
+                a.status,
+                a.version,
+                a.hold_expires_at
+            FROM asset a
+            JOIN subscription_tile st
+              ON st.event_id = a.event_id
+             AND st.tile_id = a.tile_id
+            WHERE a.event_id = :eventId
+              AND a.id = :assetId
             """.trimIndent(),
         )
             .param("eventId", eventId)
@@ -111,6 +121,7 @@ class SeatService(
                     assetId = rs.getLong("id"),
                     eventId = rs.getLong("event_id"),
                     tileId = rs.getString("tile_id"),
+                    tileVersion = rs.getLong("tile_version"),
                     status = rs.getString("status"),
                     version = rs.getLong("version"),
                     holdExpiresAt = rs.getObject("hold_expires_at", OffsetDateTime::class.java),
