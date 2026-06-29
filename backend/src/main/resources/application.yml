@@ -1,0 +1,43 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: rush-seat
+  datasource:
+    url: jdbc:postgresql://localhost:5432/rushseat
+    username: rushseat
+    password: rushseat
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+rush-seat:
+  queue:
+    token-ttl-seconds: 3600
+    admission-token-ttl-seconds: 180
+  hold:
+    ttl-seconds: 180
+    claim-ttl-millis: 2000
+  reaper:
+    fixed-delay-ms: 5000
