@@ -31,6 +31,7 @@ class QueueService(
             ),
         )
         redis.expire(tokenKey, Duration.ofSeconds(queueTokenTtlSeconds))
+        redis.opsForValue().set(userQueueTokenKey(eventId, request.userId), queueToken, Duration.ofSeconds(queueTokenTtlSeconds))
 
         val rank = redis.opsForZSet().rank(waitingKey, request.userId)?.plus(1)
         return QueueEnterResponse(
@@ -47,15 +48,16 @@ class QueueService(
             throw ApiError("QUEUE_TOKEN_EVENT_MISMATCH", "Queue token does not belong to this event", HttpStatus.FORBIDDEN)
         }
 
-        val admissionToken = redis.opsForHash<String, String>().get(queueTokenKey(queueToken), "admissionToken")
+        val hash = redis.opsForHash<String, String>()
+        val admissionToken = hash.get(queueTokenKey(queueToken), "admissionToken")
+        val admissionExpiresAt = hash.get(queueTokenKey(queueToken), "admissionExpiresAt")?.let(Instant::parse)
         if (admissionToken != null) {
-            val expiresAt = redis.expireAt(admissionTokenKey(admissionToken))
             return QueueStatusResponse(
                 status = "ADMITTED",
                 rank = null,
                 estimatedWaitSeconds = null,
                 admissionToken = admissionToken,
-                expiresAt = expiresAt,
+                expiresAt = admissionExpiresAt,
             )
         }
 
@@ -86,6 +88,18 @@ class QueueService(
                 ),
             )
             redis.expire(admissionKey, Duration.ofSeconds(admissionTokenTtlSeconds))
+
+            redis.opsForValue().get(userQueueTokenKey(eventId, userId))?.let { queueToken ->
+                redis.opsForHash<String, String>().putAll(
+                    queueTokenKey(queueToken),
+                    mapOf(
+                        "status" to "ADMITTED",
+                        "admissionToken" to admissionToken,
+                        "admissionExpiresAt" to expiresAt.toString(),
+                    ),
+                )
+            }
+
             AdmissionDto(userId = userId, admissionToken = admissionToken, expiresAt = expiresAt)
         }
 
@@ -133,6 +147,7 @@ class QueueService(
 
     private fun waitingKey(eventId: Long) = "queue:waiting:$eventId"
     private fun queueTokenKey(queueToken: String) = "queue:token:$queueToken"
+    private fun userQueueTokenKey(eventId: Long, userId: String) = "queue:user-token:$eventId:$userId"
     private fun admissionTokenKey(admissionToken: String) = "admission:token:$admissionToken"
 
     private data class QueueTokenValue(
