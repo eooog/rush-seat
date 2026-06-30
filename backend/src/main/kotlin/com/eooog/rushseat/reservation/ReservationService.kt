@@ -131,7 +131,7 @@ class ReservationService(
             """.trimIndent(),
         )
             .param("eventId", eventId)
-            .param("holdToken", requestHoldToken = holdToken)
+            .param("holdToken", holdToken)
             .param("userId", userId)
             .query(Long::class.java)
             .optional()
