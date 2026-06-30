@@ -12,7 +12,7 @@ import jakarta.persistence.Table
 class Venue protected constructor() : AuditableEntity() {
 
     @field:Column(name = "name", nullable = false, length = 200)
-    var name: String = ""
+    lateinit var name: String
         protected set
 
     @field:Column(name = "address", length = 500)
