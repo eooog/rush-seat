@@ -25,7 +25,7 @@ CREATE TABLE seat_map (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ck_seat_map_version CHECK (version > 0),
-    CONSTRAINT ck_seat_map_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'ARCHIVED'))
+    CONSTRAINT ck_seat_map_status CHECK (status IN ('ACTIVE', 'INACTIVE'))
 );
 
 CREATE UNIQUE INDEX uq_seat_map_hall_version
