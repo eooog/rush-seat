@@ -12,5 +12,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "rush-seat"
+rootProject.name = "rushmore-seat"
 include("backend")
