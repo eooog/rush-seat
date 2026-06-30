@@ -12,8 +12,8 @@ import java.util.UUID
 @Service
 class QueueService(
     private val redis: StringRedisTemplate,
-    @Value("\${rush-seat.queue.token-ttl-seconds}") private val queueTokenTtlSeconds: Long,
-    @Value("\${rush-seat.queue.admission-token-ttl-seconds}") private val admissionTokenTtlSeconds: Long,
+    @Value("\${rushmore-seat.queue.token-ttl-seconds}") private val queueTokenTtlSeconds: Long,
+    @Value("\${rushmore-seat.queue.admission-token-ttl-seconds}") private val admissionTokenTtlSeconds: Long,
 ) {
     fun enter(eventId: Long, request: QueueEnterRequest): QueueEnterResponse {
         val waitingKey = waitingKey(eventId)
