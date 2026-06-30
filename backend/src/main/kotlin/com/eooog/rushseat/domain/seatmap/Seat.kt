@@ -20,8 +20,7 @@ import org.hibernate.annotations.Check
         )
     ]
 )
-@Check(constraints = "row_index >= 0")
-@Check(constraints = "column_index >= 0")
+@Check(constraints = "row_no > 0 and column_no > 0")
 class Seat protected constructor() : AuditableEntity() {
 
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -55,22 +54,23 @@ class Seat protected constructor() : AuditableEntity() {
     var rowNo: Int = 0
         protected set
 
-    @field:Column(name = "col_no", nullable = false)
-    var colNo: Int = 0
+    @field:Column(name = "column_no", nullable = false)
+    var columnNo: Int = 0
         protected set
 
-    fun moveTo(
-        rowIndex: Int,
-        columnIndex: Int,
-    ) {
-        this.rowNo = validateIndex("rowNo", rowIndex)
-        this.colNo = validateIndex("colNo", columnIndex)
+    fun moveTo(rowNo: Int, columnNo: Int) {
+        val validatedRowNo = validateNo("rowNo", rowNo)
+        val validatedColumnNo = validateNo("columnNo", columnNo)
+
+        check(tile.contains(validatedRowNo, validatedColumnNo)) {
+            "좌석 위치는 타일 범위 안에 있어야 합니다"
+        }
+
+        this.rowNo = validatedRowNo
+        this.columnNo = validatedColumnNo
     }
 
-    fun changeDisplayLabel(
-        rowLabel: String?,
-        seatNo: String?,
-    ) {
+    fun changeDisplayLabel(rowLabel: String?, seatNo: String?) {
         this.rowLabel = normalizeNullableText("좌석 행", rowLabel, 50)
         this.seatNo = normalizeNullableText("좌석 번호", seatNo, 50)
     }
@@ -84,7 +84,7 @@ class Seat protected constructor() : AuditableEntity() {
             rowLabel: String? = null,
             seatNo: String? = null,
             rowNo: Int,
-            colNo: Int,
+            columnNo: Int,
         ): Seat {
             require(sector.seatMap == seatMap) {
                 "좌석의 구역은 동일한 좌석 배치에 속해야 합니다"
@@ -98,6 +98,13 @@ class Seat protected constructor() : AuditableEntity() {
                 "좌석의 타일은 동일한 구역에 속해야 합니다"
             }
 
+            val validatedRowNo = validateNo("rowNo", rowNo)
+            val validatedColumnNo = validateNo("columnNo", columnNo)
+
+            require(tile.contains(validatedRowNo, validatedColumnNo)) {
+                "좌석 위치는 타일 범위 안에 있어야 합니다"
+            }
+
             return Seat().apply {
                 this.seatMap = seatMap
                 this.sector = sector
@@ -105,30 +112,19 @@ class Seat protected constructor() : AuditableEntity() {
                 this.code = validateCode(code)
                 this.rowLabel = normalizeNullableText("좌석 행", rowLabel, 50)
                 this.seatNo = normalizeNullableText("좌석 번호", seatNo, 50)
-                this.rowNo = validateIndex("rowIndex", rowNo)
-                this.colNo = validateIndex("columnIndex", colNo)
+                this.rowNo = validatedRowNo
+                this.columnNo = validatedColumnNo
             }
         }
 
         private fun validateCode(code: String): String {
             val normalized = code.trim()
-
-            require(normalized.isNotBlank()) {
-                "좌석 코드는 비어 있을 수 없습니다"
-            }
-
-            require(normalized.length <= 100) {
-                "좌석 코드는 100자를 초과할 수 없습니다"
-            }
-
+            require(normalized.isNotBlank()) { "좌석 코드는 비어 있을 수 없습니다" }
+            require(normalized.length <= 100) { "좌석 코드는 100자를 초과할 수 없습니다" }
             return normalized
         }
 
-        private fun normalizeNullableText(
-            label: String,
-            value: String?,
-            maxLength: Int,
-        ): String? {
+        private fun normalizeNullableText(label: String, value: String?, maxLength: Int): String? {
             val normalized = value?.trim()
 
             if (normalized.isNullOrBlank()) {
@@ -142,12 +138,9 @@ class Seat protected constructor() : AuditableEntity() {
             return normalized
         }
 
-        private fun validateIndex(
-            name: String,
-            value: Int,
-        ): Int {
-            require(value >= 0) {
-                "$name 값은 0 이상이어야 합니다"
+        private fun validateNo(name: String, value: Int): Int {
+            require(value > 0) {
+                "$name 값은 0보다 커야 합니다"
             }
 
             return value
