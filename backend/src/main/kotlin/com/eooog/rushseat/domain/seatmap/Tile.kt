@@ -20,7 +20,7 @@ import org.hibernate.annotations.Check
         )
     ]
 )
-@Check(constraints = "seat_count >= 0")
+@Check(constraints = "row_start_no > 0 and row_end_no >= row_start_no and column_start_no > 0 and column_end_no >= column_start_no and seat_count >= 0")
 class Tile protected constructor() : AuditableEntity() {
 
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -41,15 +41,20 @@ class Tile protected constructor() : AuditableEntity() {
     lateinit var name: String
         protected set
 
-    /**
-     * WebSocket delta sync를 위한 tile version.
-     *
-     * 주의:
-     * 현재 schema에서는 seat_map 기준 tile version이다.
-     * 여러 Performance가 같은 SeatMap을 공유할 경우 회차별 version 분리가 필요하다.
-     */
-    @field:Column(name = "version", nullable = false)
-    var version: Long = 0
+    @field:Column(name = "row_start_no", nullable = false)
+    var rowStartNo: Int = 0
+        protected set
+
+    @field:Column(name = "row_end_no", nullable = false)
+    var rowEndNo: Int = 0
+        protected set
+
+    @field:Column(name = "column_start_no", nullable = false)
+    var columnStartNo: Int = 0
+        protected set
+
+    @field:Column(name = "column_end_no", nullable = false)
+    var columnEndNo: Int = 0
         protected set
 
     @field:Column(name = "seat_count", nullable = false)
@@ -60,8 +65,16 @@ class Tile protected constructor() : AuditableEntity() {
         this.name = validateName(name)
     }
 
-    fun increaseVersion() {
-        this.version += 1
+    fun changeRange(rowStartNo: Int, rowEndNo: Int, columnStartNo: Int, columnEndNo: Int) {
+        validateRange(rowStartNo, rowEndNo, columnStartNo, columnEndNo)
+        this.rowStartNo = rowStartNo
+        this.rowEndNo = rowEndNo
+        this.columnStartNo = columnStartNo
+        this.columnEndNo = columnEndNo
+    }
+
+    fun contains(rowNo: Int, columnNo: Int): Boolean {
+        return rowNo in rowStartNo..rowEndNo && columnNo in columnStartNo..columnEndNo
     }
 
     fun changeSeatCount(seatCount: Int) {
@@ -78,55 +91,54 @@ class Tile protected constructor() : AuditableEntity() {
             sector: Sector,
             code: String,
             name: String,
+            rowStartNo: Int,
+            rowEndNo: Int,
+            columnStartNo: Int,
+            columnEndNo: Int,
             seatCount: Int = 0,
         ): Tile {
             require(sector.seatMap == seatMap) {
                 "타일의 구역은 동일한 좌석 배치에 속해야 합니다"
             }
 
+            validateRange(rowStartNo, rowEndNo, columnStartNo, columnEndNo)
+
             return Tile().apply {
                 this.seatMap = seatMap
                 this.sector = sector
                 this.code = validateCode(code)
                 this.name = validateName(name)
+                this.rowStartNo = rowStartNo
+                this.rowEndNo = rowEndNo
+                this.columnStartNo = columnStartNo
+                this.columnEndNo = columnEndNo
                 this.seatCount = validateSeatCount(seatCount)
-                this.version = 0
             }
         }
 
         private fun validateCode(code: String): String {
             val normalized = code.trim()
-
-            require(normalized.isNotBlank()) {
-                "타일 코드는 비어 있을 수 없습니다"
-            }
-
-            require(normalized.length <= 50) {
-                "타일 코드는 50자를 초과할 수 없습니다"
-            }
-
+            require(normalized.isNotBlank()) { "타일 코드는 비어 있을 수 없습니다" }
+            require(normalized.length <= 50) { "타일 코드는 50자를 초과할 수 없습니다" }
             return normalized
         }
 
         private fun validateName(name: String): String {
             val normalized = name.trim()
-
-            require(normalized.isNotBlank()) {
-                "타일 이름은 비어 있을 수 없습니다"
-            }
-
-            require(normalized.length <= 100) {
-                "타일 이름은 100자를 초과할 수 없습니다"
-            }
-
+            require(normalized.isNotBlank()) { "타일 이름은 비어 있을 수 없습니다" }
+            require(normalized.length <= 100) { "타일 이름은 100자를 초과할 수 없습니다" }
             return normalized
         }
 
-        private fun validateSeatCount(seatCount: Int): Int {
-            require(seatCount >= 0) {
-                "타일 좌석 수는 0 이상이어야 합니다"
-            }
+        private fun validateRange(rowStartNo: Int, rowEndNo: Int, columnStartNo: Int, columnEndNo: Int) {
+            require(rowStartNo > 0) { "타일 시작 행 번호는 0보다 커야 합니다" }
+            require(rowEndNo >= rowStartNo) { "타일 종료 행 번호는 시작 행 번호보다 작을 수 없습니다" }
+            require(columnStartNo > 0) { "타일 시작 열 번호는 0보다 커야 합니다" }
+            require(columnEndNo >= columnStartNo) { "타일 종료 열 번호는 시작 열 번호보다 작을 수 없습니다" }
+        }
 
+        private fun validateSeatCount(seatCount: Int): Int {
+            require(seatCount >= 0) { "타일 좌석 수는 0 이상이어야 합니다" }
             return seatCount
         }
     }
