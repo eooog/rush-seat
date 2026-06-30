@@ -71,8 +71,8 @@ CREATE TABLE seat (
     code VARCHAR(100) NOT NULL,
     row_label VARCHAR(50),
     seat_no VARCHAR(50),
-    x INTEGER NOT NULL,
-    y INTEGER NOT NULL,
+    row_no INTEGER NOT NULL,
+    column_no INTEGER NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
