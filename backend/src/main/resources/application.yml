@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: rush-seat
+    name: rushmore-seat
   datasource:
     url: jdbc:postgresql://localhost:5432/rushseat
     username: rushseat
@@ -32,7 +32,7 @@ management:
       probes:
         enabled: true
 
-rush-seat:
+rushmore-seat:
   queue:
     token-ttl-seconds: 3600
     admission-token-ttl-seconds: 180
