@@ -1,6 +1,7 @@
 package com.eooog.rushseat.domain.performance
 
 import com.eooog.rushseat.domain.AuditableEntity
+import com.eooog.rushseat.domain.member.Member
 import com.eooog.rushseat.domain.seatmap.Seat
 import com.eooog.rushseat.domain.seatmap.Sector
 import com.eooog.rushseat.domain.seatmap.Tile
@@ -57,8 +58,9 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     var status: PerformanceSeatStatus = PerformanceSeatStatus.AVAILABLE
         protected set
 
-    @field:Column(name = "hold_member_id")
-    var holdMemberId: Long? = null
+    @field:ManyToOne(fetch = FetchType.LAZY)
+    @field:JoinColumn(name = "hold_member_id")
+    var holdMember: Member? = null
         protected set
 
     @field:Column(name = "hold_token", length = 120)
@@ -74,13 +76,13 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     var version: Long = 0
         protected set
 
-    fun hold(memberId: Long, token: String, expiresAt: Instant) {
+    fun hold(member: Member, token: String, expiresAt: Instant) {
         check(status == PerformanceSeatStatus.AVAILABLE) {
             "선택 가능한 좌석만 선점할 수 있습니다"
         }
 
         this.status = PerformanceSeatStatus.HELD
-        this.holdMemberId = validateMemberId(memberId)
+        this.holdMember = member
         this.holdToken = validateHoldToken(token)
         this.holdExpiresAt = expiresAt
     }
@@ -119,7 +121,7 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     }
 
     private fun clearHold() {
-        this.holdMemberId = null
+        this.holdMember = null
         this.holdToken = null
         this.holdExpiresAt = null
     }
@@ -143,11 +145,6 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
                 this.status = status
                 this.version = 0
             }
-        }
-
-        private fun validateMemberId(memberId: Long): Long {
-            require(memberId > 0) { "좌석 선점 사용자 ID는 0보다 커야 합니다" }
-            return memberId
         }
 
         private fun validateHoldToken(token: String): String {
