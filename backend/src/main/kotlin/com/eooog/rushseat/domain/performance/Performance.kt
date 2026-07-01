@@ -160,13 +160,13 @@ class Performance protected constructor() : AuditableEntity() {
         }
 
         private fun validatePerformanceTime(startsAt: Instant, endsAt: Instant) {
-            require(startsAt < endsAt) {
+            require(startsAt <= endsAt) {
                 "공연 종료 시각은 시작 시각보다 이후여야 합니다"
             }
         }
 
         private fun validateSalesPeriod(salesOpenAt: Instant, salesCloseAt: Instant) {
-            require(salesOpenAt < salesCloseAt) {
+            require(salesOpenAt <= salesCloseAt) {
                 "예매 종료 시각은 예매 시작 시각보다 이후여야 합니다"
             }
         }
