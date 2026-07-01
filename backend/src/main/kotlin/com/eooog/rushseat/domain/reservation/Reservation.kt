@@ -1,6 +1,7 @@
 package com.eooog.rushseat.domain.reservation
 
 import com.eooog.rushseat.domain.AuditableEntity
+import com.eooog.rushseat.domain.member.Member
 import com.eooog.rushseat.domain.performance.Performance
 import com.eooog.rushseat.domain.performance.PerformanceSeat
 import jakarta.persistence.Column
@@ -12,7 +13,6 @@ import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
-import org.hibernate.annotations.Check
 import java.time.Instant
 
 @Entity
@@ -25,7 +25,6 @@ import java.time.Instant
         )
     ]
 )
-@Check(constraints = "member_id > 0")
 class Reservation protected constructor() : AuditableEntity() {
 
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -38,8 +37,9 @@ class Reservation protected constructor() : AuditableEntity() {
     lateinit var performanceSeat: PerformanceSeat
         protected set
 
-    @field:Column(name = "member_id", nullable = false)
-    var memberId: Long = 0
+    @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @field:JoinColumn(name = "member_id", nullable = false)
+    lateinit var member: Member
         protected set
 
     @field:Enumerated(EnumType.STRING)
@@ -101,7 +101,7 @@ class Reservation protected constructor() : AuditableEntity() {
         fun createHeld(
             performance: Performance,
             performanceSeat: PerformanceSeat,
-            memberId: Long,
+            member: Member,
             holdToken: String,
             idempotencyKey: String,
             expiresAt: Instant,
@@ -113,18 +113,13 @@ class Reservation protected constructor() : AuditableEntity() {
             return Reservation().apply {
                 this.performance = performance
                 this.performanceSeat = performanceSeat
-                this.memberId = validateMemberId(memberId)
+                this.member = member
                 this.status = ReservationStatus.HELD
                 this.holdToken = validateHoldToken(holdToken)
                 this.idempotencyKey = validateIdempotencyKey(idempotencyKey)
                 this.expiresAt = expiresAt
                 this.confirmedAt = null
             }
-        }
-
-        private fun validateMemberId(memberId: Long): Long {
-            require(memberId > 0) { "예약 회원 ID는 0보다 커야 합니다" }
-            return memberId
         }
 
         private fun validateHoldToken(holdToken: String): String {
