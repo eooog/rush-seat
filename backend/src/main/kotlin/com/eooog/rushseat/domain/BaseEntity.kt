@@ -1,11 +1,18 @@
 package com.eooog.rushseat.domain
 
+import jakarta.persistence.Column
+import jakarta.persistence.GeneratedValue
+import jakarta.persistence.GenerationType
+import jakarta.persistence.Id
 import jakarta.persistence.MappedSuperclass
 import org.hibernate.proxy.HibernateProxy
 
 @MappedSuperclass
 abstract class BaseEntity {
 
+    @field:Id
+    @field:GeneratedValue(strategy = GenerationType.IDENTITY)
+    @field:Column(name = "id", nullable = false, updatable = false)
     var id: Long? = null
 
     override fun equals(other: Any?): Boolean {
