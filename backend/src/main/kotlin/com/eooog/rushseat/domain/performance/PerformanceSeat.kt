@@ -57,8 +57,8 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     var status: PerformanceSeatStatus = PerformanceSeatStatus.AVAILABLE
         protected set
 
-    @field:Column(name = "hold_owner_id", length = 100)
-    var holdOwnerId: String? = null
+    @field:Column(name = "hold_member_id")
+    var holdMemberId: Long? = null
         protected set
 
     @field:Column(name = "hold_token", length = 120)
@@ -74,20 +74,13 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     var version: Long = 0
         protected set
 
-    fun markClaiming() {
+    fun hold(memberId: Long, token: String, expiresAt: Instant) {
         check(status == PerformanceSeatStatus.AVAILABLE) {
-            "선택 가능한 좌석만 선택 시도 상태로 변경할 수 있습니다"
-        }
-        this.status = PerformanceSeatStatus.CLAIMING
-    }
-
-    fun hold(ownerId: String, token: String, expiresAt: Instant) {
-        check(status == PerformanceSeatStatus.AVAILABLE || status == PerformanceSeatStatus.CLAIMING) {
-            "선택 가능하거나 선택 시도 중인 좌석만 선점할 수 있습니다"
+            "선택 가능한 좌석만 선점할 수 있습니다"
         }
 
         this.status = PerformanceSeatStatus.HELD
-        this.holdOwnerId = validateOwnerId(ownerId)
+        this.holdMemberId = validateMemberId(memberId)
         this.holdToken = validateHoldToken(token)
         this.holdExpiresAt = expiresAt
     }
@@ -105,8 +98,20 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     }
 
     fun releaseHold() {
-        check(status == PerformanceSeatStatus.HELD || status == PerformanceSeatStatus.CLAIMING) {
-            "선점 또는 선택 시도 상태의 좌석만 해제할 수 있습니다"
+        check(status == PerformanceSeatStatus.HELD) {
+            "선점된 좌석만 해제할 수 있습니다"
+        }
+
+        this.status = PerformanceSeatStatus.AVAILABLE
+        clearHold()
+    }
+
+    fun expireHold(now: Instant) {
+        check(status == PerformanceSeatStatus.HELD) {
+            "선점된 좌석만 만료 처리할 수 있습니다"
+        }
+        check(holdExpiresAt != null && !holdExpiresAt!!.isAfter(now)) {
+            "아직 선점 만료 시간이 지나지 않았습니다"
         }
 
         this.status = PerformanceSeatStatus.AVAILABLE
@@ -114,7 +119,7 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
     }
 
     private fun clearHold() {
-        this.holdOwnerId = null
+        this.holdMemberId = null
         this.holdToken = null
         this.holdExpiresAt = null
     }
@@ -140,11 +145,9 @@ class PerformanceSeat protected constructor() : AuditableEntity() {
             }
         }
 
-        private fun validateOwnerId(ownerId: String): String {
-            val normalized = ownerId.trim()
-            require(normalized.isNotBlank()) { "좌석 선점 사용자 ID는 비어 있을 수 없습니다" }
-            require(normalized.length <= 100) { "좌석 선점 사용자 ID는 100자를 초과할 수 없습니다" }
-            return normalized
+        private fun validateMemberId(memberId: Long): Long {
+            require(memberId > 0) { "좌석 선점 사용자 ID는 0보다 커야 합니다" }
+            return memberId
         }
 
         private fun validateHoldToken(token: String): String {
