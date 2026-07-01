@@ -16,9 +16,13 @@ import com.eooog.rushseat.application.reservation.required.SaveReservationPort
 import com.eooog.rushseat.application.reservation.required.SeatHeldEvent
 import com.eooog.rushseat.application.reservation.required.SeatReservedEvent
 import com.eooog.rushseat.domain.reservation.ReservationStatus
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.util.UUID
 
+@Service
 class ReservationService(
     private val loadPerformanceSalesStatusPort: LoadPerformanceSalesStatusPort,
     private val loadReservationPort: LoadReservationPort,
@@ -27,9 +31,12 @@ class ReservationService(
     private val confirmPerformanceSeatPort: ConfirmPerformanceSeatPort,
     private val confirmReservationPort: ConfirmReservationPort,
     private val publishSeatChangePort: PublishSeatChangePort,
-    private val holdTtl: Duration = Duration.ofMinutes(3),
+    @Value("\${rushmore-seat.hold.ttl-seconds}") holdTtlSeconds: Long,
 ) : HoldSeatUseCase, ConfirmReservationUseCase {
 
+    private val holdTtl: Duration = Duration.ofSeconds(holdTtlSeconds)
+
+    @Transactional
     override fun hold(command: HoldSeatCommand): HoldSeatResult {
         val performance = loadPerformanceSalesStatusPort.load(command.performanceId)
             ?: return HoldSeatResult(
@@ -108,6 +115,7 @@ class ReservationService(
         )
     }
 
+    @Transactional
     override fun confirm(command: ConfirmReservationCommand): ConfirmReservationResult {
         val seatResult = confirmPerformanceSeatPort.confirm(
             ConfirmPerformanceSeatCommand(
