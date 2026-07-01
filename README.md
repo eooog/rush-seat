@@ -43,18 +43,43 @@ Performer
 - `Seat`는 고정 좌석 배치 정보다.
 - `PerformanceSeat`는 특정 공연 회차에서의 좌석 상태다.
 - `Performance`의 PK는 별도 surrogate id를 사용한다.
+- `PerformanceStatus`는 공연 자체 상태만 표현한다.
+- `PerformanceSalesStatus`는 예매 판매 상태만 표현한다.
 - `starts_at`, `ends_at`, `hall_id`는 공연 회차의 속성으로 두고 PK나 unique identity로 쓰지 않는다.
 - 시간 범위 중복 방지는 MVP에서는 DB constraint로 강제하지 않는다. 필요 시 service validation 또는 PostgreSQL exclusion constraint로 확장한다.
 
-현재 1차 구현은 아직 `event/asset` 기반 skeleton이며, 이후 `performance/performance_seat` 기준으로 정리할 예정이다.
+---
+
+## Performance Status
+
+공연 상태와 판매 상태는 분리한다.
+
+```text
+PerformanceStatus
+- SCHEDULED
+- CANCELLED
+
+PerformanceSalesStatus
+- BEFORE_SALE
+- ON_SALE
+- CLOSED
+```
+
+예매 가능 여부는 두 조건을 함께 본다.
+
+```text
+PerformanceStatus == SCHEDULED
+and PerformanceSalesStatus == ON_SALE
+```
 
 ---
 
 ## Seat State
 
+RDB에 저장되는 좌석 상태는 최종 의미가 있는 상태만 둔다.
+
 ```text
 AVAILABLE
-  -> CLAIMING
   -> HELD
   -> RESERVED
 ```
@@ -62,11 +87,10 @@ AVAILABLE
 | State | Meaning |
 |---|---|
 | AVAILABLE | 선택 가능 |
-| CLAIMING | 누군가 방금 선택 시도 중 |
-| HELD | 특정 사용자가 제한 시간 동안 선점 |
+| HELD | 특정 사용자가 제한 시간 동안 임시 선점 |
 | RESERVED | 예약 확정 |
 
-`CLAIMING`은 UX 완화용 상태다. 최종 정합성은 PostgreSQL 조건부 update로 보장한다.
+`CLAIMING`은 RDB 상태로 저장하지 않는다. 클릭 처리 중 상태가 필요하면 Redis claim gate 또는 WebSocket transient event로만 표현한다.
 
 ---
 
@@ -116,7 +140,7 @@ SeatMap
 | Concept | Purpose |
 |---|---|
 | Sector | 사용자에게 보이는 공연장 구역 |
-| Tile | WebSocket 구독 및 delta push 단위 |
+| Tile | Sector 내부의 경량 로딩 / WebSocket 동기화 단위 |
 
 기본 목표:
 
@@ -129,7 +153,34 @@ Batch interval: 100ms
 Batch max changes: 200
 ```
 
+Sector 진입 시 전체 Tile summary만 로드하고, 실제 Seat 상세는 사용자가 보는 Tile에 대해서만 조회한다.
+
+```text
+Sector 선택
+  -> Tile summary 조회
+  -> Tile별 잔여 상태를 색상이나 밀도로 표시
+  -> 필요한 Tile의 Seat 상세 조회
+  -> 필요한 Tile의 좌석 변경만 구독
+```
+
 느린 클라이언트의 outbound queue가 밀리면 오래된 delta를 계속 쌓지 않고 `TILE_RESYNC_REQUIRED`를 전송한 뒤 snapshot 재조회로 복구한다.
+
+---
+
+## Seat Map Position Terms
+
+표시값과 계산값을 분리한다.
+
+```text
+rowLabel = 사용자에게 보이는 행 표시값. 예: AA
+colLabel = 사용자에게 보이는 열/좌석 표시값. 예: 13
+rowNo    = 내부 계산용 행 번호
+colNo    = 내부 계산용 열 번호
+```
+
+Tile의 row/col 범위는 실제 좌석 도형이 아니라 bounding box다. Sector 또는 Tile이 반드시 직사각형일 필요는 없다. 실제 좌석 존재 여부는 `Seat` 목록으로 표현한다.
+
+MVP에서는 polygon, row offset, row별 seat count 같은 정밀 layout metadata는 관리하지 않는다.
 
 ---
 
@@ -148,7 +199,6 @@ flowchart TD
     Client <-->|Tile Events| WSGateway[WebSocket Gateway]
 
     Client -->|Hold / Confirm| ReservationAPI[Reservation API]
-    ReservationAPI --> RedisClaim[(Redis Claim Gate)]
     ReservationAPI --> Postgres[(PostgreSQL)]
 
     ReservationAPI --> EventPublisher[Seat Event Publisher]
@@ -193,6 +243,7 @@ POST /performances/{performanceId}/queue
 GET  /performances/{performanceId}/queue/me
 
 GET /performances/{performanceId}/sectors/summary
+GET /performances/{performanceId}/sectors/{sectorId}/tiles/summary
 GET /performances/{performanceId}/tiles/{tileId}/seats
 
 WS /ws/performances/{performanceId}?token={admissionToken}
@@ -205,25 +256,13 @@ POST /performances/{performanceId}/reservations/confirm
 
 ## Hold Strategy
 
-좌석 hold는 두 단계로 처리한다.
-
-### 1. Redis Claim Gate
-
-동시 클릭 UX를 줄이기 위한 짧은 gate다.
-
-```text
-SET seat:claim:{performanceId}:{performanceSeatId} {userId} NX PX 2000
-```
-
-Redis claim gate는 정합성 장치가 아니다. 최종 정합성은 DB가 보장한다.
-
-### 2. PostgreSQL Conditional Update
+Baseline에서는 Redis claim gate 없이 PostgreSQL 조건부 update만 사용한다.
 
 ```sql
 UPDATE performance_seat
 SET
     status = 'HELD',
-    hold_owner_id = :userId,
+    hold_member_id = :memberId,
     hold_token = :holdToken,
     hold_expires_at = now() + interval '3 minutes',
     version = version + 1,
@@ -237,6 +276,43 @@ WHERE id = :performanceSeatId
 affected rows = 1 -> hold success
 affected rows = 0 -> already held or reserved
 ```
+
+DB row lock은 transaction 동안만 짧게 유지한다. 사용자 결제/확정 대기 시간 동안 DB transaction이나 connection을 유지하지 않는다. 임시 점유는 `HELD + hold_expires_at` lease로 표현한다.
+
+Redis claim gate는 2차 개선안으로 추가한다.
+
+```text
+without Redis gate:
+- 모든 hold 시도가 DB conditional update까지 도달
+
+with Redis gate:
+- 같은 좌석의 동시 클릭 중 하나만 DB hold path로 진입
+- 나머지는 Redis SET NX PX 단계에서 빠르게 실패
+```
+
+비교 지표:
+
+- hold API p50 / p95 / p99
+- DB update latency
+- DB lock wait
+- DB connection pool usage
+- failed update count
+- hot-seat contention scenario throughput
+
+---
+
+## Hold Timeout Recovery
+
+hold 상태는 DB connection 유지가 아니라 만료 시각으로 관리한다.
+
+```text
+HELD and hold_expires_at < now()
+  -> AVAILABLE
+  -> reservation EXPIRED
+  -> WebSocket SEAT_RELEASED
+```
+
+confirm 시점에도 `hold_expires_at > now()` 조건을 함께 검증한다. 서버 장애나 WebSocket event 누락이 있어도 DB 상태와 만료 worker를 기준으로 복구한다.
 
 ---
 
@@ -287,7 +363,7 @@ MVP success criteria:
 7. false-positive click failure rate < 0.5%
 8. hold API p95 < 500ms
 9. WebSocket propagation p95 < 300ms
-10. tile size별 p50 / p95 / p99 비교 리포트 작성
+10. Redis claim gate 추가 전후 hot-seat contention 비교 리포트 작성
 ```
 
 ---
@@ -341,17 +417,17 @@ Implemented:
 - sector summary 조회
 - tile seat snapshot 조회
 - raw WebSocket tile subscription
-- Redis claim gate
 - PostgreSQL conditional update 기반 hold
 - reservation row 생성 및 confirm 기초 흐름
 - Vite + Vanilla TypeScript + Canvas 기반 최소 프론트
+- Venue / Hall / SeatMap / Sector / Tile / Seat / Show / Performer / Performance 도메인 일부 반영
 
 Next:
 
 - `event/asset` 명칭을 `performance/performance_seat`로 정리
-- Venue / Hall / SeatMap / Sector / Tile / Seat / Performer / Show / Performance 도메인 반영
 - 10만 seat seed runner 추가
 - expired hold reaper 구현
 - Redis read model 도입
 - WebSocket batch/coalescing 및 Redis Pub/Sub backplane 적용
+- Redis claim gate 추가 전후 부하 테스트 비교
 - k6 부하 테스트 스크립트 작성
