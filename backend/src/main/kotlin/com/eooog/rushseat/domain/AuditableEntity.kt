@@ -19,7 +19,7 @@ abstract class AuditableEntity : BaseEntity() {
         protected set
 
     @field:LastModifiedDate
-    @field:Column(name = "created_at", nullable = false, updatable = false)
+    @field:Column(name = "updated_at", nullable = false)
     var updatedAt: Instant? = null
         protected set
 
